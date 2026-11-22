@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+<!-- PWA мета-теги для iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Заказ-наряд">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a6fd4">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<title>Генератор документов (Заказ-наряд + Счёт)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 Arial,sans-serif;background:#eef1f5;color:#222;padding-top:env(safe-area-inset-top)}
+  .app{display:grid;grid-template-columns:420px 1fr;gap:12px;padding:12px;align-items:start}
+  .panel{background:#fff;border:1px solid #d7dbe0;border-radius:8px;padding:14px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+  .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  button{font:inherit;padding:8px 12px;border:1px solid #d7dbe0;background:#f7f9fc;border-radius:6px;cursor:pointer}
+  button:hover{background:#eef4ff}
+  button.primary{background:#1a6fd4;border-color:#1a6fd4;color:#fff;font-weight:bold}
+  button.primary:hover{background:#1559a8}
+  button.del{padding:2px 7px;color:#b00;border-color:#e6bcbc;background:#fff5f5}
+  fieldset{border:1px solid #d7dbe0;border-radius:6px;margin:0 0 10px;padding:10px}
+  legend{font-weight:bold;font-size:13px;color:#444;padding:0 5px}
+  label{display:block;font-size:12px;color:#555;margin:6px 0 2px}
+  input,select,textarea{width:100%;padding:6px 8px;font:inherit;border:1px solid #d7dbe0;border-radius:5px;background:#fff;font-size:16px}
+  textarea{resize:vertical;min-height:50px}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px}
+  .rows{display:flex;flex-direction:column;gap:6px}
+  .row{border:1px dashed #ccc;padding:8px;background:#fafafa;border-radius:6px}
+  .row .top{display:flex;gap:6px;align-items:center}
+  .row .top input{flex:1}
+  .preview{overflow:auto}
+  .tabs{display:flex;gap:4px;margin-bottom:10px}
+  .tab{flex:1;padding:10px;background:#e9ecef;border:none;border-radius:6px;font-weight:bold;cursor:pointer}
+  .tab.active{background:#1a6fd4;color:#fff}
+  .page{display:none}
+  .page.active{display:block}
+
+  .sheet{width:210mm;min-height:297mm;padding:10mm;margin:0 auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.15);font:9pt/1.3 "Times New Roman",serif;color:#000}
+  .sheet table{width:100%;border-collapse:collapse}
+  .sheet .bd td,.sheet .bd th{border:.5pt solid #000;padding:2pt 3pt;vertical-align:top}
+  .sheet .bd th{background:#f0f0f0;font-weight:bold;text-align:center;font-size:8pt}
+  .sheet .nob td{border:0;padding:1pt 0}
+  .sheet .t8{font-size:8pt}
+  .sheet h1{font-size:12pt;margin:4pt 0;text-align:center;font-family:Arial,sans-serif}
+  .sheet h2{font-size:10pt;margin:6pt 0 3pt;font-family:Arial,sans-serif}
+  .sheet .r{text-align:right}
+  .sheet .c{text-align:center}
+  .sheet .b{font-weight:bold}
+  .sheet .small{font-size:8pt}
+  .sheet .sumline{font-size:9.5pt;margin-top:4pt}
+  .sheet .sig{margin-top:8pt}
+  .sheet .sig td{padding:6pt 4pt 2pt 0;font-size:9pt}
+  .sheet tr{break-inside:avoid;page-break-inside:avoid}
+
+  .bank{border:1pt solid #000;margin-bottom:6pt}
+  .bank td{border:.5pt solid #000;padding:2pt 3pt;font-size:8pt;vertical-align:top}
+  .bank .lbl{font-size:7pt;color:#000}
+  .bank .val{font-weight:bold;font-size:9pt}
+
+  /* Адаптация под мобильные */
+  @media (max-width:900px){
+    .app{grid-template-columns:1fr;padding:8px}
+    .panel{position:static;max-height:none}
+    .sheet{width:100%;min-height:auto;padding:8mm}
+    .g3{grid-template-columns:1fr 1fr}
+    .g4{grid-template-columns:1fr 1fr}
+  }
+
+  @media print{
+    body{background:#fff}
+    .app{display:block;padding:0}
+    .panel,.tabs{display:none!important}
+    .preview{overflow:visible}
+    .sheet{width:auto;min-height:0;padding:0;margin:0;box-shadow:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+<section class="panel">
+  <div class="tabs">
+    <button class="tab active" onclick="showDoc('order')">Заказ-наряд</button>
+    <button class="tab" onclick="showDoc('invoice')">Счёт</button>
+  </div>
+  <div class="toolbar">
+    <button class="primary" onclick="downloadPDF()">📥 Скачать PDF</button>
+    <button onclick="window.print()">🖨 Печать</button>
+    <button onclick="demo()">Демо</button>
+    <button onclick="saveJSON()">💾 JSON</button>
+    <button onclick="fileIn.click()">📂 Загрузить</button>
+    <button onclick="resetAll()">🗑 Очистить</button>
+    <input type="file" id="fileIn" accept=".json" hidden>
+  </div>
+
+  <fieldset><legend>Поставщик (Исполнитель)</legend>
+    <label>Наименование / ФИО ИП</label><input data-f="sup.name">
+    <div class="g3">
+      <div><label>ИНН</label><input data-f="sup.inn"></div>
+      <div><label>КПП</label><input data-f="sup.kpp"></div>
+      <div><label>ОГРН/ОГРНИП</label><input data-f="sup.ogrn"></div>
+    </div>
+    <label>Адрес</label><input data-f="sup.addr">
+    <label>Телефон</label><input data-f="sup.phone">
+  </fieldset>
+
+  <fieldset><legend>Банковские реквизиты поставщика</legend>
+    <label>Банк получателя</label><input data-f="sup.bank">
+    <div class="g2">
+      <div><label>БИК</label><input data-f="sup.bik"></div>
+      <div><label>Кор. счёт</label><input data-f="sup.corr"></div>
+    </div>
+    <label>Расчётный счёт</label><input data-f="sup.acc">
+  </fieldset>
+
+  <fieldset><legend>Заказчик</legend>
+    <label>Наименование</label><input data-f="cust.name">
+    <div class="g2">
+      <div><label>ИНН</label><input data-f="cust.inn"></div>
+      <div><label>КПП</label><input data-f="cust.kpp"></div>
+    </div>
+    <label>Адрес</label><input data-f="cust.addr">
+    <label>Телефон</label><input data-f="cust.phone">
+  </fieldset>
+
+  <fieldset><legend>Плательщик (если отличается от заказчика)</legend>
+    <label><input type="checkbox" data-f="payer.same" style="width:auto;margin-right:6px"> Совпадает с заказчиком</label>
+    <label>Наименование</label><input data-f="payer.name">
+    <div class="g2">
+      <div><label>ИНН</label><input data-f="payer.inn"></div>
+      <div><label>КПП</label><input data-f="payer.kpp"></div>
+    </div>
+    <label>Адрес</label><input data-f="payer.addr">
+    <label>Телефон</label><input data-f="payer.phone">
+  </fieldset>
+
+  <fieldset><legend>Автомобиль</legend>
+    <div class="g2">
+      <div><label>Марка, модель</label><input data-f="car.brand"></div>
+      <div><label>Гос. номер</label><input data-f="car.plate"></div>
+    </div>
+    <div class="g3">
+      <div><label>VIN</label><input data-f="car.vin"></div>
+      <div><label>Год выпуска</label><input data-f="car.year"></div>
+      <div><label>Пробег, км</label><input data-f="car.mileage"></div>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>Заказ-наряд</legend>
+    <div class="g3">
+      <div><label>Номер</label><input data-f="doc.num"></div>
+      <div><label>Дата</label><input type="date" data-f="doc.date"></div>
+      <div><label>Вид ремонта</label>
+        <select data-f="doc.repair"><option>Платный</option><option>Гарантийный</option></select>
+      </div>
+    </div>
+    <div class="g2">
+      <div><label>Принят</label><input type="date" data-f="doc.accepted"></div>
+      <div><label>Выполнен</label><input type="date" data-f="doc.completed"></div>
+    </div>
+    <div class="g2">
+      <div><label>Диспетчер</label><input data-f="doc.dispatcher"></div>
+      <div><label>Мастер</label><input data-f="doc.master"></div>
+    </div>
+    <label>Причина обращения</label><textarea data-f="doc.reason"></textarea>
+  </fieldset>
+
+  <fieldset><legend>Счёт на оплату</legend>
+    <div class="g2">
+      <div><label>Номер</label><input data-f="inv.num"></div>
+      <div><label>Дата</label><input type="date" data-f="inv.date"></div>
+    </div>
+    <label>Основание (договор)</label><input data-f="inv.contract" placeholder="Основной договор">
+  </fieldset>
+
+  <fieldset><legend>Работы (услуги)</legend>
+    <div class="rows" id="worksRows"></div>
+    <div style="margin-top:6px"><button onclick="addRow('works')">+ Добавить работу</button></div>
+  </fieldset>
+
+  <fieldset><legend>Запчасти и материалы</legend>
+    <div class="rows" id="partsRows"></div>
+    <div style="margin-top:6px"><button onclick="addRow('parts')">+ Добавить запчасть</button></div>
+  </fieldset>
+
+  <fieldset><legend>НДС</legend>
+    <div class="g2">
+      <div><label>Тип</label>
+        <select data-f="fin.vat">
+          <option value="none">Без НДС</option>
+          <option value="in">В том числе НДС</option>
+          <option value="out">НДС сверху</option>
+        </select>
+      </div>
+      <div><label>Ставка, %</label>
+        <select data-f="fin.rate"><option>20</option><option>10</option><option>0</option></select>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>Гарантии и рекомендации</legend>
+    <label>Гарантии</label><textarea data-f="fin.warranty"></textarea>
+    <label>Рекомендации</label><textarea data-f="fin.recommend"></textarea>
+  </fieldset>
+</section>
+
+<section class="preview">
+  <div id="orderPage" class="page active"><div id="orderDoc" class="sheet"></div></div>
+  <div id="invoicePage" class="page"><div id="invoiceDoc" class="sheet"></div></div>
+</section>
+</div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isFinite(n)?n:0};
+const r2=n=>Math.round((n+Number.EPSILON)*100)/100;
+const money=n=>r2(n).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nl=s=>esc(s).replace(/\n/g,'<br>');
+const dash=s=>(s===undefined||s===null||String(s).trim()==='')?'—':esc(s);
+function fdate(v){if(!v)return '—';const[y,m,d]=v.slice(0,10).split('-');const months=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];return `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`}
+function fdateShort(v){if(!v)return '—';const[y,m,d]=v.slice(0,10).split('-');return `${d}.${m}.${y}`}
+const get=(o,p)=>p.split('.').reduce((a,k)=>a?.[k],o);
+const set=(o,p,v)=>{const k=p.split('.'),l=k.pop();k.reduce((a,x)=>a[x]??={},o)[l]=v};
+
+function words(n,f){const a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return f[2];if(b>1&&b<5)return f[1];if(b===1)return f[0];return f[2]}
+function triplet(n,female){const o=female?['','одна','две','три','четыре','пять','шесть','семь','восемь','девять']:['','один','два','три','четыре','пять','шесть','семь','восемь','девять'];const t=['','','двадцать','тридцать','сорок','пятьдесят','шестьдесят','семьдесят','восемьдесят','девяносто'];const teen=['десять','одиннадцать','двенадцать','тринадцать','четырнадцать','пятнадцать','шестнадцать','семнадцать','восемнадцать','девятнадцать'];const h=['','сто','двести','триста','четыреста','пятьсот','шестьсот','семьсот','восемьсот','девятьсот'];let out=[],x=n%1000;if(x>=100)out.push(h[Math.floor(x/100)]);const d=x%100;if(d>=10&&d<20)out.push(teen[d-10]);else{if(d>=20)out.push(t[Math.floor(d/10)]);if(d%10)out.push(o[d%10])}return out.filter(Boolean).join(' ')}
+function propisum(sum){const total=Math.round(r2(sum)*100),rub=Math.floor(total/100),kop=total%100;const groups=[[1e9,['миллиард','миллиарда','миллиардов'],false],[1e6,['миллион','миллиона','миллионов'],false],[1e3,['тысяча','тысячи','тысяч'],true],[1,null,false]];let parts=[],rest=rub;for(const[div,names,female]of groups){const v=div?Math.floor(rest/div):rest;if(div)rest%=div;if(!v)continue;parts.push(triplet(v,female)+(names?' '+words(v,names):''))}let s=parts.join(' ')||'ноль';s=s.charAt(0).toUpperCase()+s.slice(1);return `${s} ${words(rub,['рубль','рубля','рублей'])} ${String(kop).padStart(2,'0')} ${words(kop,['копейка','копейки','копеек'])}`}
+
+const KEY='docs-pwa-v1';
+const today=new Date().toISOString().slice(0,10);
+
+const DEFAULT_SUP={name:'ИП Сопин А. Е.',inn:'463227484079',kpp:'',ogrn:'315463200000123',addr:'305038, Курск, улица Косухина, дом 28, квартира 33',phone:'+7 (900) 123-45-67',bank:'АО "АЛЬФА-БАНК" Г. МОСКВА',bik:'044525593',corr:'30101810200000000593',acc:'40802810601740000842'};
+const DEFAULT_MASTER='Сопин Алексей Евгеньевич';
+
+const blank=()=>({
+  sup:{...DEFAULT_SUP},
+  cust:{name:'',inn:'',kpp:'',addr:'',phone:''},
+  payer:{same:true,name:'',inn:'',kpp:'',addr:'',phone:''},
+  car:{brand:'',plate:'',vin:'',year:'',mileage:''},
+  doc:{num:'',date:today,repair:'Платный',accepted:today,completed:'',dispatcher:DEFAULT_MASTER,master:DEFAULT_MASTER,reason:''},
+  inv:{num:'',date:today,contract:'Основной договор'},
+  works:[{name:'',article:'',qty:1,norm:1,hourPrice:0}],
+  parts:[{name:'',article:'',qty:1,unit:'шт',price:0}],
+  fin:{vat:'none',rate:'20',warranty:'Гарантия на работы: слесарные - 30 дней, электрические - 30 дней, оригинальные з/ч - 30 дней, з/ч, связанные с электрооборудованием, подачей топлива и системой впрыска - гарантии нет, неоригинальные з/ч - гарантии нет. Гарантийные обязательства на работы выполняются фирмой только при предъявлении акта приемки автомобиля и техпаспорта (доверенности).',recommend:''}
+});
+let S=blank();
+
+function load(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(!raw)return;
+    const d=JSON.parse(raw),b=blank();
+    for(const k in b)S[k]=Array.isArray(b[k])?(d[k]??b[k]):Object.assign(b[k],d[k]||{});
+    S.doc.date=today;
+    S.doc.accepted=today;
+    S.inv.date=today;
+  }catch(e){S=blank()}
+}
+const save=()=>localStorage.setItem(KEY,JSON.stringify(S));
+
+function fillForm(){$$('[data-f]').forEach(el=>{const v=get(S,el.dataset.f);if(el.type==='checkbox')el.checked=!!v;else el.value=v??''});renderRows('works');renderRows('parts')}
+$$('[data-f]').forEach(el=>el.addEventListener('input',()=>{const v=el.type==='checkbox'?el.checked:el.value;set(S,el.dataset.f,v);render();save()}));
+
+function renderRows(key){
+  const box=$('#'+key+'Rows');
+  if(key==='works'){
+    box.innerHTML=S.works.map((r,i)=>`<div class="row" data-key="${key}" data-i="${i}">
+      <div class="top"><input data-k="name" placeholder="Наименование" value="${esc(r.name)}"><input data-k="article" placeholder="Артикул" value="${esc(r.article)}" style="max-width:120px"><button class="del" onclick="delRow('${key}',${i})">✕</button></div>
+      <div class="g4" style="margin-top:4px">
+        <div><label>Кол-во</label><input data-k="qty" type="number" step="0.001" value="${r.qty}"></div>
+        <div><label>Норма</label><input data-k="norm" type="number" step="0.001" value="${r.norm}"></div>
+        <div><label>Цена н/ч</label><input data-k="hourPrice" type="number" step="0.01" value="${r.hourPrice}"></div>
+        <div><label>Сумма</label><input value="${money(r.qty*r.norm*r.hourPrice)}" readonly style="background:#f5f5f5"></div>
+      </div></div>`).join('');
+  }else{
+    box.innerHTML=S.parts.map((r,i)=>`<div class="row" data-key="${key}" data-i="${i}">
+      <div class="top"><input data-k="name" placeholder="Наименование" value="${esc(r.name)}"><input data-k="article" placeholder="Артикул" value="${esc(r.article)}" style="max-width:120px"><button class="del" onclick="delRow('${key}',${i})">✕</button></div>
+      <div class="g4" style="margin-top:4px">
+        <div><label>Кол-во</label><input data-k="qty" type="number" step="0.001" value="${r.qty}"></div>
+        <div><label>Ед.</label><input data-k="unit" value="${esc(r.unit)}"></div>
+        <div><label>Цена</label><input data-k="price" type="number" step="0.01" value="${r.price}"></div>
+        <div><label>Сумма</label><input value="${money(r.qty*r.price)}" readonly style="background:#f5f5f5"></div>
+      </div></div>`).join('');
+  }
+}
+$('#worksRows').addEventListener('input',rowEdit);
+$('#partsRows').addEventListener('input',rowEdit);
+function rowEdit(e){const row=e.target.closest('.row');if(!row)return;const{key,i}=row.dataset,k=e.target.dataset.k;if(!k)return;S[key][i][k]=k==='name'||k==='article'||k==='unit'?e.target.value:num(e.target.value);render();save()}
+function addRow(key){S[key].push(key==='works'?{name:'',article:'',qty:1,norm:1,hourPrice:0}:{name:'',article:'',qty:1,unit:'шт',price:0});renderRows(key);render();save()}
+function delRow(key,i){S[key].splice(i,1);renderRows(key);render();save()}
+
+function calc(){
+  const workSum=S.works.reduce((t,w)=>t+r2(w.qty*w.norm*w.hourPrice),0);
+  const partSum=S.parts.reduce((t,p)=>t+r2(p.qty*p.price),0);
+  const base=r2(workSum+partSum);
+  let vat=0,label='Без налога (НДС)';
+  const rate=num(S.fin.rate);
+  if(S.fin.vat==='in'){vat=r2(base*rate/(100+rate));label=`В том числе НДС ${rate}%`}
+  if(S.fin.vat==='out'){vat=r2(base*rate/100);label=`НДС ${rate}%`}
+  return{workSum,partSum,base,vat,label,total:base};
+}
+
+function showDoc(type){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(type+'Page').classList.add('active');
+  document.querySelectorAll('.tab')[type==='order'?0:1].classList.add('active');
+}
+
+function renderOrder(){
+  const c=calc(),s=S.sup,cu=S.cust,p=S.payer.same?cu:S.payer,a=S.car,d=S.doc;
+  const payerStr=`${dash(p.name)}, ИНН ${dash(p.inn)}${p.kpp?', КПП '+esc(p.kpp):''}, ${dash(p.addr)}${p.phone?', тел.: '+esc(p.phone):''}`;
+  
+  let worksHtml='';
+  if(S.works.length){
+    const rows=S.works.map((w,i)=>{const sum=r2(w.qty*w.norm*w.hourPrice);return `<tr>
+      <td class="c">${i+1}</td>
+      <td>${dash(w.name)}${w.article?', '+esc(w.article):''}</td>
+      <td class="c">${w.qty.toFixed(3)}</td>
+      <td class="c">${w.norm.toFixed(3)}</td>
+      <td></td>
+      <td class="r">${money(w.hourPrice)}</td>
+      <td class="r">${money(sum)}</td></tr>`}).join('');
+    worksHtml=`<h2>Выполненные работы по заказ-наряду № ${dash(d.num)} от ${fdateShort(d.date)} г.</h2>
+    <table class="bd t8">
+      <thead><tr><th style="width:8mm">№</th><th>Наименование, артикул работ</th><th style="width:14mm">Кол. оп.</th><th style="width:14mm">Норма</th><th style="width:10mm">н/ч</th><th style="width:22mm">Цена н/ч</th><th style="width:24mm">Сумма</th></tr></thead>
+      <tbody>${rows}
+        <tr><td colspan="6" class="r b">Итого работ:</td><td class="r b">${money(c.workSum)}</td></tr>
+      </tbody></table>
+    <div class="small" style="margin-top:4pt">
+      ${esc(c.label)}${c.vat?' - '+money(c.vat):' -'}<br>
+      Всего оказано Работ ${S.works.length}, на сумму ${money(c.workSum)} руб.<br>
+      ${propisum(c.workSum)}
+    </div>`;
+  }
+
+  let partsHtml='';
+  if(S.parts.length){
+    const rows=S.parts.map((p,i)=>{const sum=r2(p.qty*p.price);return `<tr>
+      <td class="c">${i+1}</td>
+      <td>${dash(p.name)}${p.article?', '+esc(p.article):''}</td>
+      <td class="c">${p.qty.toFixed(3)}</td>
+      <td class="c">${esc(p.unit)}</td>
+      <td class="r">${money(p.price)}</td>
+      <td class="r">${money(sum)}</td></tr>`}).join('');
+    partsHtml=`<h2>Расходная накладная к заказ-наряду № ${dash(d.num)} от ${fdateShort(d.date)} г.</h2>
+    <table class="bd t8">
+      <thead><tr><th style="width:8mm">№</th><th>Наименование, характеристика, артикул товаров</th><th style="width:14mm">Кол-во</th><th style="width:14mm">Ед.изм.</th><th style="width:22mm">Цена</th><th style="width:24mm">Сумма</th></tr></thead>
+      <tbody>${rows}
+        <tr><td colspan="5" class="r b">Итого:</td><td class="r b">${money(c.partSum)}</td></tr>
+      </tbody></table>
+    <div class="small" style="margin-top:4pt">
+      ${esc(c.label)}${c.vat?' - '+money(c.vat):' -'}<br>
+      Всего деталей ${S.parts.reduce((t,p)=>t+num(p.qty),0)}, на сумму ${money(c.partSum)} руб.<br>
+      ${propisum(c.partSum)}
+    </div>`;
+  }
+
+  $('#orderDoc').innerHTML=`
+  <div class="small"><b>ПОСТАВЩИК:</b> ${dash(s.name)}, ИНН ${dash(s.inn)}, ${dash(s.addr)}</div>
+  <h1>Заказ-наряд № ${dash(d.num)} от ${fdate(d.date)}</h1>
+  <table class="nob small">
+    <tr><td style="width:30%"><b>Заказчик:</b></td><td>${dash(cu.name)}</td></tr>
+    <tr><td><b>адрес заказчика:</b></td><td>${dash(cu.addr)}${cu.phone?' телефоны:'+esc(cu.phone):''}</td></tr>
+  </table>
+  <table class="nob small" style="margin-top:4pt">
+    <tr><td colspan="4"><b>Автомобиль:</b> ${dash(a.brand)} гос. номер: ${dash(a.plate)} VIN: ${dash(a.vin)} год вып. ${dash(a.year)} г. пробег ${dash(a.mileage)}</td></tr>
+  </table>
+  <table class="nob small" style="margin-top:4pt">
+    <tr><td colspan="4"><b>Плательщик:</b> ${payerStr}</td></tr>
+  </table>
+  <table class="nob small" style="margin-top:6pt">
+    <tr>
+      <td style="width:33%"><b>Принят:</b> ${fdateShort(d.accepted)}</td>
+      <td style="width:33%"><b>Вид ремонта:</b> ${esc(d.repair)}</td>
+      <td style="width:34%"><b>Выполнен:</b> ${fdateShort(d.completed)}</td>
+    </tr>
+    <tr>
+      <td><b>Диспетчер:</b> ${dash(d.dispatcher)}</td>
+      <td colspan="2"><b>Мастер:</b> ${dash(d.master)}</td>
+    </tr>
+  </table>
+  ${worksHtml}
+  ${partsHtml}
+  <div class="sumline" style="margin-top:8pt">
+    <b>Итого по заказ-наряду: ${money(c.total)}</b><br>
+    ${esc(c.label)}${c.vat?' - '+money(c.vat):' -'}<br>
+    Всего по заказ-наряду: ${propisum(c.total)}
+  </div>
+  <div class="sig">
+    <table class="nob">
+      <tr><td style="width:50%">Мастер_____________________/${dash(d.master)}/</td><td></td></tr>
+    </table>
+  </div>
+  ${S.fin.warranty?`<div class="small" style="margin-top:8pt"><b>Гарантии:</b> ${nl(S.fin.warranty)}</div>`:''}
+  ${S.fin.recommend?`<div class="small" style="margin-top:4pt"><b>Рекомендации:</b> ${nl(S.fin.recommend)}</div>`:''}
+  <div class="sig" style="margin-top:10pt">
+    <table class="nob">
+      <tr><td style="width:50%">Заказчик______________________/${dash(cu.name)}/</td><td style="width:50%"><b>Дата:</b> ${fdateShort(d.date)} г.</td></tr>
+    </table>
+  </div>
+  ${d.reason?`<div class="small" style="margin-top:6pt"><b>Причина обращения:</b> ${nl(d.reason)}</div>`:''}
+  `;
+}
+
+function renderInvoice(){
+  const c=calc(),s=S.sup,cu=S.cust,i=S.inv;
+  const items=[];
+  S.parts.forEach(p=>items.push({name:p.name,article:p.article,qty:p.qty,unit:p.unit,price:p.price,sum:r2(p.qty*p.price)}));
+  S.works.forEach(w=>items.push({name:w.name,article:w.article,qty:w.qty,unit:'',price:r2(w.norm*w.hourPrice),sum:r2(w.qty*w.norm*w.hourPrice)}));
+  const rows=items.map((it,idx)=>`<tr>
+    <td class="c">${idx+1}</td>
+    <td>${dash(it.name)}</td>
+    <td>${dash(it.article)}</td>
+    <td class="c">${it.qty}</td>
+    <td class="c">${esc(it.unit)}</td>
+    <td class="r">${money(it.price)}</td>
+    <td class="r">${money(it.sum)}</td></tr>`).join('');
+
+  $('#invoiceDoc').innerHTML=`
+  <table class="bank">
+    <tr>
+      <td colspan="2" style="width:45%"><span class="lbl">Банк получателя</span><br><span class="val">${dash(s.bank)}</span></td>
+      <td style="width:15%"><span class="lbl">БИК</span><br><span class="val">${dash(s.bik)}</span></td>
+      <td colspan="2" rowspan="2" style="width:40%"><span class="lbl">Сч. №</span><br><span class="val">${dash(s.corr)}</span></td>
+    </tr>
+    <tr><td colspan="2"></td><td></td></tr>
+    <tr>
+      <td style="width:10%"><span class="lbl">ИНН</span><br><span class="val">${dash(s.inn)}</span></td>
+      <td style="width:10%"><span class="lbl">КПП</span><br><span class="val">${dash(s.kpp)}</span></td>
+      <td colspan="2"></td>
+      <td rowspan="2"><span class="lbl">Сч. №</span><br><span class="val">${dash(s.acc)}</span></td>
+    </tr>
+    <tr><td colspan="4"><span class="lbl">Получатель:</span><br><span class="val">${dash(s.name)}</span></td></tr>
+  </table>
+  <h1>Счет на оплату № ${dash(i.num)} от ${fdate(i.date)}</h1>
+  <table class="nob small" style="margin-top:6pt">
+    <tr><td style="width:20%"><b>Поставщик</b><br>(исполнитель):</td><td>${dash(s.name)}, ИНН ${dash(s.inn)}, ${dash(s.addr)}</td></tr>
+    <tr><td><b>Покупатель</b><br>(заказчик):</td><td>${dash(cu.name)}, ИНН ${dash(cu.inn)}${cu.kpp?', КПП '+esc(cu.kpp):''}, ${dash(cu.addr)}${cu.phone?', тел.: '+esc(cu.phone):''}</td></tr>
+    <tr><td><b>Основание:</b></td><td>Договор: ${dash(i.contract)}</td></tr>
+  </table>
+  <table class="bd t8" style="margin-top:8pt">
+    <thead><tr>
+      <th style="width:8mm">№</th>
+      <th>Товар (Услуга)</th>
+      <th style="width:22mm">Код</th>
+      <th style="width:14mm">Кол-во</th>
+      <th style="width:12mm">Ед.</th>
+      <th style="width:22mm">Цена</th>
+      <th style="width:24mm">Сумма</th>
+    </tr></thead>
+    <tbody>${rows}
+      <tr><td colspan="6" class="r b">Итого:</td><td class="r b">${money(c.total)}</td></tr>
+    </tbody>
+  </table>
+  <div class="small" style="margin-top:4pt">
+    ${esc(c.label)}${c.vat?' - '+money(c.vat):' -'}<br>
+    <b>Всего к оплате: ${money(c.total)}</b><br>
+    Всего наименований ${items.length}, на сумму ${money(c.total)} руб.<br>
+    ${propisum(c.total)}
+  </div>
+  <div class="small" style="margin-top:8pt;line-height:1.4">
+    Оплата данного счета означает согласие с условиями поставки товара.<br>
+    Уведомление об оплате обязательно, в противном случае не гарантируется наличие товара на складе.<br>
+    Товар отпускается по факту прихода денег на р/с Поставщика, самовывозом, при наличии доверенности и паспорта.
+  </div>
+  <div class="sig" style="margin-top:12pt">
+    <table class="nob">
+      <tr>
+        <td style="width:50%">
+          <b>Предприниматель ${dash(s.name.replace(/^ИП\s*/,''))}</b><br>
+          <span style="font-size:8pt">подпись &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; расшифровка подписи</span>
+        </td>
+        <td style="width:50%;text-align:right">
+          <div style="border:1px solid #000;width:60px;height:60px;margin-left:auto;display:flex;align-items:center;justify-content:center;font-size:8pt">М.П.</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+  `;
+}
+
+function render(){renderOrder();renderInvoice()}
+
+function downloadPDF(){
+  const activePage=document.querySelector('.page.active .sheet');
+  const docType=document.querySelector('.tab.active').textContent.trim();
+  const num=document.querySelector('.tab.active').textContent.includes('Заказ')?S.doc.num:S.inv.num;
+  const date=document.querySelector('.tab.active').textContent.includes('Заказ')?S.doc.date:S.inv.date;
+  const filename=`${docType} № ${num||'б-н'} от ${date||'без-даты'}.pdf`;
+  
+  html2pdf().from(activePage).set({
+    margin:0,
+    filename:filename,
+    image:{type:'jpeg',quality:0.98},
+    html2canvas:{scale:2,useCORS:true,letterRendering:true},
+    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+    pagebreak:{mode:['avoid-all','css','legacy']}
+  }).save();
+}
+
+function saveJSON(){
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`Документы_${S.doc.num||'б-н'}_${S.doc.date}.json`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+
+$('#fileIn').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{const b=blank(),d=JSON.parse(r.result);for(const k in b)S[k]=Array.isArray(b[k])?(d[k]??b[k]):Object.assign(b[k],d[k]||{});fillForm();render();save()}catch(err){alert('Некорректный файл')}};
+  r.readAsText(f);e.target.value='';
+});
+
+function resetAll(){
+  if(confirm('Очистить данные заказа? Реквизиты поставщика и мастера останутся.')){
+    const keepSup={...S.sup};
+    const keepMaster=S.doc.master;
+    const keepDispatcher=S.doc.dispatcher;
+    S=blank();
+    S.sup=keepSup;
+    S.doc.master=keepMaster;
+    S.doc.dispatcher=keepDispatcher;
+    fillForm();render();save();
+  }
+}
+
+function demo(){
+  S.cust={name:'ООО СК "Базальт"',inn:'4632177761',kpp:'463201001',addr:'305019, Курская обл, Курск г, Малых ул, дом № 44Б, корпус А, офис 1,2',phone:'+7 (4712) 39-40-44, 39-40-60'};
+  S.payer={same:true,name:'',inn:'',kpp:'',addr:'',phone:''};
+  S.car={brand:'Toyota Camry',plate:'К250АР46',vin:'',year:'',mileage:'140 900'};
+  S.doc.num='4';
+  S.inv.num='5';
+  S.works=[
+    {name:'Замена масла',article:'НФ-00000040',qty:1,norm:1,hourPrice:800},
+    {name:'Замена опорного подшипника',article:'НФ-00000191',qty:2,norm:1,hourPrice:2500},
+    {name:'Замена шаровой опоры',article:'НФ-00000174',qty:2,norm:1,hourPrice:1000},
+    {name:'Замена свечей зажигания',article:'НФ-00000039',qty:4,norm:1,hourPrice:250},
+    {name:'Развал-схождение',article:'НФ-00000107',qty:1,norm:1,hourPrice:2000}
+  ];
+  S.parts=[
+    {name:'Масло моторное Тойота 6л',article:'НФ-00000312',qty:1,unit:'шт',price:7900},
+    {name:'Фильтр масляный',article:'НФ-00000009',qty:1,unit:'шт',price:1250},
+    {name:'Фильтр воздушный',article:'НФ-00000032',qty:1,unit:'шт',price:1400},
+    {name:'Фильтр салонный',article:'НФ-00000033',qty:1,unit:'шт',price:1300},
+    {name:'Опора(ориг.)',article:'НФ-00000575',qty:2,unit:'шт',price:8000},
+    {name:'Подшипник',article:'НФ-00000576',qty:2,unit:'шт',price:4500},
+    {name:'Шаровая опора(ориг.)',article:'НФ-00000577',qty:2,unit:'шт',price:7500},
+    {name:'Свеча зажигания(оригинал)',article:'НФ-00000035',qty:4,unit:'шт',price:1800}
+  ];
+  fillForm();render();save();
+}
+
+load();fillForm();render();
+
+// Регистрация Service Worker для PWA
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(()=>{
+    console.log('SW зарегистрирован');
+  }).catch(err=>console.log('SW ошибка:',err));
+}
+</script>
+</body>
+</html>
